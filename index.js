@@ -1,80 +1,61 @@
 const express = require('express');
-const fs = require('fs');
-const path = require('path');
-const games = require('./files/games.json')
-const students = require('./files/school.json')
-
+const { error } = require('console');
+const db = require('./db_connection.js');
 const app = express();
-const port = 8484;
+const port = 3000;
 
-const readStaticFiles = async (file_path) => {
+app.use(express.json());
+
+// Create a new game
+app.post('/games', async (req, res) => {
+    const collection = db.get('games');
+    const { title, price, minPlayers, minAge } = req.body;
+    if (typeof title !== 'string' || typeof price !== 'number' || minPlayers < 1 || minPlayers > 10 || minAge < 7 || minAge > 99) {
+        return res.status(400).send('Invalid input:', error);
+    }
+    const newGame = { title, price, minPlayers, minAge };
     try {
-        const data = await fs.promises.readFile(path.join(__dirname, file_path), 'utf-8');
-        return data;
-    } catch (e) {
-        console.log("Error while trying to read file: ", e);
-    }
-};
-
-app.get('/page1.html', async (req, res) => {
-    const data = await readStaticFiles('./templates/page1.html');
-    res.setHeader('Content-Type', 'text/html');
-    res.send(data);
-});
-
-app.get('/page2.html', async (req, res) => {
-    const data = await readStaticFiles('./templates/page2.html');
-    res.setHeader('Content-Type', 'text/html');
-    res.send(data);
-});
-
-app.get('/', async (req, res) => {
-    if (req.query.a !== undefined && req.query.b !== undefined) {
-        const result = parseInt(req.query.a) * parseFloat(req.query.b)
-        console.log(parseInt(req.query.a) * parseFloat(req.query.b))
-        res.setHeader('Content-Type', 'text/json');
-        res.send(JSON.stringify(result));
-    } else {
-        res.setHeader('Content-Type', 'text/json');
-        res.send(games);
+        let obj = await collection.insertOne(newGame);
+        res.status(201).json(obj);
+    } catch (error) {
+        res.status(500).send('Error creating game:', error);
     }
 });
 
-app.get('/:a/:b', async (req, res) => {
-    const result = parseInt(req.params.a, 10) * parseFloat(req.params.b, 10)
-    res.setHeader('Content-Type', 'application/json');
-    res.send(JSON.stringify({ result: result }));
-});
-
-app.get('/students/:num', (req, res) => {
-    res.setHeader('Content-Type', 'application/json');
-    console.log("hell")
-    const index = parseInt(req.params.num, 10);
-    if (index >= 0 && index < students.length) {
-        res.setHeader('Content-Type', 'application/json');
-        res.json(students[index]);
-    } else {
-        res.status(404).send('Student not found');
+// Read (GET) games
+app.get('/games', async (req, res) => {
+    const collection = db.get('games');
+    let limit = parseInt(req.query.limit) || 3;
+    limit = Math.min(limit, 7); // Limit to a maximum of 7 games
+    try {
+        const games = await collection.find().limit(limit).toArray();
+        res.json(games);
+    } catch (error) {
+        res.status(500).send('Error retrieving games:', error);
     }
 });
 
-app.get('/students', (req, res) => {
-    res.setHeader('Content-Type', 'text/json')
-    res.send(JSON.stringify(students))
-})
-
-
-app.get('/index.html', async (req, res) => {
-    const data = await readStaticFiles('./templates/index.html');
-    res.setHeader('Content-Type', 'text/html');
-    res.send(data);
+// Delete a game
+app.delete('/games/:id', async (req, res) => {
+    const collection = db.get('games');
+    const id = req.params.id;
+    try {
+        const result = await collection.deleteOne({ _id: db.ObjectId(id) });
+        if (result.deletedCount === 0) {
+            return res.status(404).send('Game not found');
+        }
+        res.status(200).send('Game deleted');
+    } catch (error) {
+        res.status(500).send('Error deleting game:', error);
+    }
 });
 
-app.use((req, res) => {
-    res.setHeader('Content-Type', 'application/json');
-    res.status(404).json({ error: "Can't find your request" });
+process.on('SIGINT', async () => {
+    db?.close();
+    process.exit(0);
 });
 
 app.listen(port, () => {
-    console.log(`Server started on port ${port}`);
+    console.log(`Server is running on http://localhost:${port}`);
+    db.open();
 });
